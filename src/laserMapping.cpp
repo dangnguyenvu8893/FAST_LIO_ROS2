@@ -933,6 +933,7 @@ public:
         pubLaserCloudMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/Laser_map", 20);
         pubOdomAftMapped_ = this->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 20);
         pubPath_ = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
+        pubSavedMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/saved_map", 20);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
         //------------------------------------------------------------------------------------------------------
@@ -941,6 +942,10 @@ public:
 
         auto map_period_ms = std::chrono::milliseconds(static_cast<int64_t>(1000.0));
         map_pub_timer_ = rclcpp::create_timer(this, this->get_clock(), map_period_ms, std::bind(&LaserMappingNode::map_publish_callback, this));
+
+        // Add timer for saved map publishing
+        auto saved_map_period_ms = std::chrono::milliseconds(static_cast<int64_t>(5000.0)); // 5 seconds
+        saved_map_pub_timer_ = rclcpp::create_timer(this, this->get_clock(), saved_map_period_ms, std::bind(&LaserMappingNode::saved_map_publish_callback, this));
 
         map_save_srv_ = this->create_service<std_srvs::srv::Trigger>("map_save", std::bind(&LaserMappingNode::map_save_callback, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -954,7 +959,6 @@ public:
         fclose(fp);
     }
 
-private:
     void timer_callback()
     {
         if(sync_packages(Measures))
@@ -1112,6 +1116,44 @@ private:
         if (map_pub_en) publish_map(pubLaserCloudMap_);
     }
 
+    void publish_saved_map()
+    {
+        if (map_file_path.empty())
+        {
+            RCLCPP_WARN(this->get_logger(), "No map file path specified");
+            return;
+        }
+
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
+        if (pcl::io::loadPCDFile<pcl::PointXYZI>(map_file_path, *cloud) == -1)
+        {
+            RCLCPP_ERROR(this->get_logger(), "Couldn't read file %s", map_file_path.c_str());
+            return;
+        }
+
+        if (cloud->points.empty())
+        {
+            RCLCPP_WARN(this->get_logger(), "Saved map is empty (0 points)");
+            return;
+        }
+
+        RCLCPP_INFO(this->get_logger(), "Publishing saved map with %lu points", cloud->points.size());
+
+        sensor_msgs::msg::PointCloud2 cloud_msg;
+        pcl::toROSMsg(*cloud, cloud_msg);
+        cloud_msg.header.frame_id = "camera_init";
+        cloud_msg.header.stamp = this->get_clock()->now();
+        pubSavedMap_->publish(cloud_msg);
+    }
+
+    void saved_map_publish_callback()
+    {
+        if (pcd_save_en && !map_file_path.empty())
+        {
+            publish_saved_map();
+        }
+    }
+
     void map_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req, std_srvs::srv::Trigger::Response::SharedPtr res)
     {
         RCLCPP_INFO(this->get_logger(), "Received map save request");
@@ -1129,6 +1171,9 @@ private:
             res->success = true;
             res->message = "Map saved successfully to " + map_file_path;
             RCLCPP_INFO(this->get_logger(), "Map saved successfully");
+            
+            // Publish the saved map
+            publish_saved_map();
         }
         else
         {
@@ -1145,6 +1190,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubSavedMap_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
@@ -1152,6 +1198,7 @@ private:
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr map_pub_timer_;
+    rclcpp::TimerBase::SharedPtr saved_map_pub_timer_;  // New timer for saved map publishing
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_save_srv_;
 
     bool effect_pub_en = false, map_pub_en = false;
