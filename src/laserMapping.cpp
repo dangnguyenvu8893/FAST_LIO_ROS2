@@ -1114,17 +1114,27 @@ private:
 
     void map_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req, std_srvs::srv::Trigger::Response::SharedPtr res)
     {
-        RCLCPP_INFO(this->get_logger(), "Saving map to %s...", map_file_path.c_str());
+        RCLCPP_INFO(this->get_logger(), "Received map save request");
+        RCLCPP_INFO(this->get_logger(), "Current map status:");
+        RCLCPP_INFO(this->get_logger(), "- Map points: %d", pcl_wait_pub->size());
+        RCLCPP_INFO(this->get_logger(), "- Current position: [%.2f, %.2f, %.2f]", 
+                    state_point.pos(0), state_point.pos(1), state_point.pos(2));
+        RCLCPP_INFO(this->get_logger(), "- Current orientation: [%.2f, %.2f, %.2f]", 
+                    euler_cur(0), euler_cur(1), euler_cur(2));
+
         if (pcd_save_en)
         {
+            RCLCPP_INFO(this->get_logger(), "Saving map to %s...", map_file_path.c_str());
             save_to_pcd();
             res->success = true;
-            res->message = "Map saved.";
+            res->message = "Map saved successfully to " + map_file_path;
+            RCLCPP_INFO(this->get_logger(), "Map saved successfully");
         }
         else
         {
+            RCLCPP_WARN(this->get_logger(), "Map save is disabled in configuration");
             res->success = false;
-            res->message = "Map save disabled.";
+            res->message = "Map save is disabled in configuration";
         }
     }
 
